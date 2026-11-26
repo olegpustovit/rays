@@ -60,6 +60,7 @@ pub struct CacheContext(Rc<CacheData>);
 struct CacheData {
     retained: RefCell<IdList>,
     batches: RefCell<Vec<rr::Batch>>,
+    submission: RefCell<Option<rr::Submission>>,
 }
 
 thread_local! {
@@ -79,6 +80,7 @@ pub(crate) fn create_cache_context() -> CacheContext {
             None,
         )),
         batches: RefCell::new(Vec::new()),
+        submission: RefCell::new(None),
     }))
 }
 
@@ -227,15 +229,25 @@ fn lower_all(
 pub(crate) fn render(execution: &rr::Renderer, density: i64, width: i64, height: i64, scene: &[scene::Node]) -> Result<(), Error> {
     let context = current();
     let mut batches = context.as_ref().map_or_else(Vec::new, |context| context.0.batches.take());
-    let result = render_into(execution, density, width, height, scene, &mut batches);
+    let mut submission = context.as_ref().and_then(|context| context.0.submission.take());
+    let result = render_into(execution, density, width, height, scene, &mut batches, &mut submission);
     if let Some(context) = context {
         batches.clear();
         *context.0.batches.borrow_mut() = batches;
+        *context.0.submission.borrow_mut() = submission;
     }
     result
 }
 
-fn render_into(execution: &rr::Renderer, density: i64, width: i64, height: i64, scene: &[scene::Node], batches: &mut Vec<rr::Batch>) -> Result<(), Error> {
+fn render_into(
+    execution: &rr::Renderer,
+    density: i64,
+    width: i64,
+    height: i64,
+    scene: &[scene::Node],
+    batches: &mut Vec<rr::Batch>,
+    spare: &mut Option<rr::Submission>,
+) -> Result<(), Error> {
     let mut cancel = Cancel(None);
     let prepared: Result<Outcome, Error> = {
         let _release = Release(scene);
@@ -253,7 +265,7 @@ fn render_into(execution: &rr::Renderer, density: i64, width: i64, height: i64, 
                 match replayed {
                     Err(e) => Err(e),
                     Ok(Some(())) => Ok(Outcome::Replayed),
-                    Ok(None) => match rr::begin_submission(execution) {
+                    Ok(None) => match rr::begin_submission_reusing(execution, spare) {
                         Err(e) => Err(Error::Begin(e)),
                         Ok(submission) => {
                             cancel.0 = Some(submission.clone());
@@ -277,6 +289,7 @@ fn render_into(execution: &rr::Renderer, density: i64, width: i64, height: i64, 
                 None => native::step(Some(staged.clear), None, None, &submission, batches),
                 Some((identity, version)) => native::step(Some(staged.clear), Some(identity), Some(*version), &submission, batches),
             };
+            *spare = Some(submission);
             stepped.map_err(Error::Step)
         }
     }

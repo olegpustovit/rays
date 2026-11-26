@@ -767,8 +767,8 @@ fn cached_auxiliary_of(item: &Item) -> CachedAuxiliaryRef {
     item.clone().downcast::<RefCell<CachedAuxiliary>>().unwrap_or_else(|_| unreachable!("auxiliary table item"))
 }
 
-fn prepared_run_of(item: &Item) -> Rc<PreparedRun> {
-    item.clone().downcast::<PreparedRun>().unwrap_or_else(|_| unreachable!("prepared table item"))
+fn prepared_run_of(item: &Item) -> Rc<RefCell<PreparedRun>> {
+    item.clone().downcast::<RefCell<PreparedRun>>().unwrap_or_else(|_| unreachable!("prepared table item"))
 }
 
 fn skey(key: &str) -> TableKey {
@@ -823,7 +823,10 @@ pub struct SceneExecution {
     next_uniform_page: usize,
     /// frames in a row needing under a quarter of the page
     uniform_low: i64,
-    previous_uniforms: Vec<Option<UniformSlice>>,
+    previous_uniforms: Rc<Vec<Option<UniformSlice>>>,
+    submit_draws: Vec<Draw>,
+    submit_modes: Vec<DrawMode>,
+    geometry_constants: Vec<(Option<Bytes>, Bytes)>,
     /// Host-side packing buffer reused across uniform uploads (Shared destinations write from here;
     /// DeviceLocal destinations copy through `buffer_staging`).
     uniform_staging: Vec<u8>,
@@ -1248,7 +1251,10 @@ pub fn create(
                 uniform_pages: vec![None],
                 next_uniform_page: 0,
                 uniform_low: 0,
-                previous_uniforms: Vec::new(),
+                previous_uniforms: Rc::new(Vec::new()),
+                submit_draws: Vec::new(),
+                submit_modes: Vec::new(),
+                geometry_constants: Vec::new(),
                 uniform_staging: Vec::new(),
                 mesh_upload_scratch: Vec::new(),
                 signature_scratch: Vec::new(),
@@ -1599,7 +1605,13 @@ fn align256(value: i64) -> i64 {
 
 /// A Scene2 mesh's constants (marks.rays, geometry-vertex): its affine (24 bytes of floats or 48 of
 /// doubles, none the identity) and the colour flag: each vertex carries its colour word
-fn geometry_constants(affine: Option<&Bytes>) -> Bytes {
+fn geometry_constants(cache: &mut Vec<(Option<Bytes>, Bytes)>, affine: Option<&Bytes>) -> Bytes {
+    if let Some(i) = cache.iter().position(|(old, _)| old.as_ref() == affine) {
+        let hit = cache.remove(i);
+        let result = hit.1.clone();
+        cache.push(hit);
+        return result;
+    }
     let mut constants = vec![0u8; 32];
     let mut put = |index: usize, value: f32| constants[index * 4..index * 4 + 4].copy_from_slice(&value.to_le_bytes());
     match affine {
@@ -1621,7 +1633,10 @@ fn geometry_constants(affine: Option<&Bytes>) -> Bytes {
         }
     }
     put(6, 1.0);
-    new_bytes(constants)
+    let constants = new_bytes(constants);
+    if cache.len() == 8 { cache.remove(0); }
+    cache.push((affine.cloned(), constants.clone()));
+    constants
 }
 
 // ponytail: a changed transform repacks the frame; use dirty ranges only if sparse-change
@@ -1678,29 +1693,30 @@ fn write_gpu_bytes(value: &mut SceneExecution, destination: &Buffer, offset: i64
     }
 }
 
-fn uniform_shape_matches(sources: &[Option<Bytes>], previous: &[Option<UniformSlice>]) -> bool {
-    sources.len() == previous.len()
-        && sources.iter().zip(previous.iter()).all(|(source, retained)| match (source, retained) {
+fn uniform_shape_matches(modes: &[DrawMode], previous: &[Option<UniformSlice>]) -> bool {
+    modes.len() == previous.len()
+        && modes.iter().map(|mode| &mode.source).zip(previous.iter()).all(|(source, retained)| match (source, retained) {
             (None, None) => true,
             (Some(bytes_), Some(slice)) => bytes_.len() == slice.length,
             _ => false,
         })
 }
 
-fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sources: &[Option<Bytes>]) -> Result<Vec<Option<UniformSlice>>, Error> {
+fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, modes: &[DrawMode]) -> Result<Rc<Vec<Option<UniformSlice>>>, Error> {
+    let sources = || modes.iter().map(|mode| &mode.source);
     let operation = "Scene_execution.prepare_uniforms";
     // one page per plan S6: a frame's needs far under it for long enough bring it back down, also
     // when the uniforms stop changing
     let capacity = value.uniform_pages[value.next_uniform_page].as_ref().map_or(0, |page| page.capacity);
-    let wanted: i64 = sources.iter().map(|s| s.as_ref().map_or(0, |b| align256(blen(b) as i64))).sum();
+    let wanted: i64 = sources().map(|s| s.as_ref().map_or(0, |b| align256(blen(b) as i64))).sum();
     value.uniform_low = if capacity > 65536 && wanted * 4 < capacity { value.uniform_low + 1 } else { 0 };
     let shrink = value.uniform_low >= UNIFORM_SHRINK_AFTER_FRAMES;
     if shrink {
         value.uniform_low = 0;
     }
     let same = !shrink
-        && sources.len() == value.previous_uniforms.len()
-        && sources.iter().zip(value.previous_uniforms.iter()).all(|(source, retained)| match (source, retained) {
+        && modes.len() == value.previous_uniforms.len()
+        && sources().zip(value.previous_uniforms.iter()).all(|(source, retained)| match (source, retained) {
             (None, None) => true,
             (Some(bytes_), Some(slice)) => {
                 let b = bytes_;
@@ -1713,7 +1729,7 @@ fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sourc
     // non-finite values and light counts outside 0..64 here, before anything is written; unchanged
     // frames skip this.
     let malformed_scene3 = || {
-        sources.iter().any(|source| match source {
+        sources().any(|source| match source {
             Some(bytes_) if blen(bytes_) >= 5456 => {
                 let b = bytes_;
                 let finite = (0..b.len() / 4).all(|index| f32_at(&b, index).is_finite());
@@ -1731,13 +1747,12 @@ fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sourc
     }
     // Same slice lengths at the same offsets: patch the retained page in place and keep the plan/ICB.
     // Note: do not call drop_plans — the encoded ICB still references these buffer/offset bindings.
-    if !shrink && uniform_shape_matches(sources, &value.previous_uniforms) && value.previous_uniforms.iter().any(|s| s.is_some()) {
+    if !shrink && uniform_shape_matches(modes, &value.previous_uniforms) && value.previous_uniforms.iter().any(|s| s.is_some()) {
         let page_buffer = value.previous_uniforms.iter().find_map(|s| s.as_ref().map(|u| u.buffer.clone()));
         let Some(page_buffer) = page_buffer else {
             return Ok(value.previous_uniforms.clone());
         };
-        let patches: Vec<(i64, usize, usize, &[u8])> = sources
-            .iter()
+        let patches: Vec<(i64, usize, usize, &[u8])> = sources()
             .zip(value.previous_uniforms.iter())
             .filter_map(|(source, retained)| match (source, retained) {
                 (Some(bytes_), Some(slice)) => Some((slice.offset, slice.staging_offset, slice.length, bytes_.as_slice())),
@@ -1771,14 +1786,15 @@ fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sourc
                 })
             })
             .collect();
+        let patched = Rc::new(patched);
         value.previous_uniforms = patched.clone();
         return Ok(patched);
     }
     drop_plans(value);
-    value.previous_uniforms = Vec::new();
+    Rc::make_mut(&mut value.previous_uniforms).clear();
     let mut needed: i64 = 0;
     let mut valid = true;
-    for source in sources.iter().flatten() {
+    for source in sources().flatten() {
         let length = blen(source) as i64;
         if length > UNIFORM_PAGE_BYTE_CAPACITY {
             valid = false;
@@ -1795,7 +1811,7 @@ fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sourc
         return Err(failure_error(operation, ErrorKind::Capacity, "one submission exceeds the bounded transform-uniform bytes"));
     }
     if needed == 0 {
-        return Ok(vec![None; sources.len()]);
+        return Ok(Rc::new(vec![None; modes.len()]));
     }
     let page_index = value.next_uniform_page;
     let reuse = matches!(&value.uniform_pages[page_index], Some(page) if page.capacity >= needed && !shrink);
@@ -1827,8 +1843,8 @@ fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sourc
     value.uniform_staging[..needed as usize].fill(0);
     let mut cursor: i64 = 0;
     let mut payload: i64 = 0;
-    let mut offsets: Vec<Option<(i64, usize)>> = vec![None; sources.len()];
-    for (index, source) in sources.iter().enumerate() {
+    let mut offsets: Vec<Option<(i64, usize)>> = vec![None; modes.len()];
+    for (index, source) in sources().enumerate() {
         if let Some(bytes_) = source {
             let b = bytes_;
             value.uniform_staging[cursor as usize..cursor as usize + b.len()].copy_from_slice(&b);
@@ -1841,7 +1857,7 @@ fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sourc
     write_gpu_bytes(value, &page_buffer, 0, &packed)?;
     value.uploaded += payload;
     let staging = Rc::new(packed);
-    Ok(offsets
+    Ok(Rc::new(offsets
         .into_iter()
         .map(|entry| {
             entry.map(|(offset, length)| UniformSlice {
@@ -1852,7 +1868,7 @@ fn prepare_uniforms(value: &mut SceneExecution, defer: &mut Vec<Deferred>, sourc
                 length,
             })
         })
-        .collect())
+        .collect()))
 }
 
 /// The texel format follows from level 0's byte count: 4, 8 or 16 bytes per texel are
@@ -2339,7 +2355,7 @@ fn draw_bytes(entry: &SampledDraw) -> i64 {
     (entry.draw.mesh.vertex_bytes_len() + blen(&entry.draw.mesh.indices)) as i64 + attribute_bytes(entry)
 }
 
-fn coalesce_draws(draws: &[Draw]) -> Result<Vec<Draw>, Error> {
+fn coalesce_draws_into(draws: &[Draw], result: &mut Vec<Draw>) -> Result<(), Error> {
     let stride = |mesh: &Mesh| if mesh.vertex_count == 0 { 0 } else { mesh.vertex_bytes_len() as i64 / mesh.vertex_count };
     let compatible = |first: &SampledDraw, next: &SampledDraw| {
         matches!((&first.draw.mesh.key, &next.draw.mesh.key), (MeshKey::Host(_), MeshKey::Host(_)))
@@ -2355,7 +2371,7 @@ fn coalesce_draws(draws: &[Draw]) -> Result<Vec<Draw>, Error> {
             && same_optional_auxiliary(&first.auxiliary, &next.auxiliary)
             && first.vertex_attributes.is_some() == next.vertex_attributes.is_some()
     };
-    let mut result: Vec<Draw> = Vec::new();
+    result.clear();
     let mut position = 0;
     while position < draws.len() {
         let first = &draws[position];
@@ -2400,7 +2416,7 @@ fn coalesce_draws(draws: &[Draw]) -> Result<Vec<Draw>, Error> {
             result.push(Rc::new(merged));
         }
     }
-    Ok(result)
+    Ok(())
 }
 
 fn prepared_bytes_of(draws: &[Draw]) -> i64 {
@@ -2418,30 +2434,39 @@ pub(crate) fn retained_draw_bytes(entry: &SampledDraw) -> i64 {
             .saturating_add(texture_bytes(&a.texture)).saturating_add(a.environment.as_ref().map_or(0, texture_bytes))))
 }
 
-fn resolve_prepared(value: &mut SceneExecution, prepared: &Option<(String, i64)>, draws: &[Draw]) -> Result<Vec<Draw>, Error> {
-    match prepared {
-        Some((identity, _)) if identity.is_empty() => {
-            Err(failure_error("Scene_execution.prepare_run", ErrorKind::InvalidArgument, "prepared identity is empty"))
-        }
-        Some((identity, version)) => {
-            if let Some(item) = side_lru::find(&mut value.prepared_cache, &skey(identity)) {
-                let item = prepared_run_of(&item);
-                if item.version == *version {
-                    return Ok(item.draws.clone());
-                }
-            }
-            let prepared_draws = coalesce_draws(draws)?;
-            let item = Rc::new(PreparedRun {
-                version: *version,
-                bytes: prepared_bytes_of(&prepared_draws),
-                draws: prepared_draws.clone(),
-            });
-            let bytes_ = item.bytes;
-            side_lru::add(&mut value.prepared_cache, bytes_, skey(identity), item);
-            Ok(prepared_draws)
-        }
-        None => coalesce_draws(draws),
+fn resolve_prepared(value: &mut SceneExecution, prepared: &Option<(String, i64)>, draws: &[Draw], out: &mut Vec<Draw>) -> Result<(), Error> {
+    let Some((identity, version)) = prepared else { return coalesce_draws_into(draws, out) };
+    if identity.is_empty() {
+        return Err(failure_error("Scene_execution.prepare_run", ErrorKind::InvalidArgument, "prepared identity is empty"));
     }
+    let key = skey(identity);
+    let old = side_lru::find(&mut value.prepared_cache, &key).map(|item| prepared_run_of(&item));
+    if let Some(old) = &old {
+        let old = old.borrow();
+        if old.version == *version {
+            out.extend_from_slice(&old.draws);
+            return Ok(());
+        }
+    }
+    coalesce_draws_into(draws, out)?;
+    let bytes = prepared_bytes_of(out);
+    let (item, resize) = match old {
+        Some(item) => {
+            let mut run = item.borrow_mut();
+            let resize = run.bytes != bytes;
+            run.version = *version;
+            run.bytes = bytes;
+            run.draws.clear();
+            run.draws.extend_from_slice(out);
+            drop(run);
+            (item, resize)
+        }
+        None => (Rc::new(RefCell::new(PreparedRun { version: *version, bytes, draws: out.clone() })), true),
+    };
+    if resize {
+        side_lru::add(&mut value.prepared_cache, bytes, key, item);
+    }
+    Ok(())
 }
 
 fn intersect_extent(bound_w: i64, bound_h: i64, (x, y, w, h): (i64, i64, i64, i64)) -> Option<(i64, i64, i64, i64)> {
@@ -3891,9 +3916,9 @@ fn finish_prepared_frame(
     value: &mut SceneExecution,
     frame: Acquired,
     clear: (f64, f64, f64, f64),
-    prepared_key: &Option<(String, i64)>,
+    prepared_key: Option<(String, i64)>,
     draw_count: i64,
-    uniform_slices: Vec<Option<UniformSlice>>,
+    uniform_slices: Rc<Vec<Option<UniformSlice>>>,
     after_prepare: &mut dyn FnMut(),
 ) -> Result<bool, Error> {
     after_prepare();
@@ -3916,8 +3941,8 @@ fn finish_prepared_frame(
         if let Some((identity, version)) = prepared_key {
             value.automatic_submission = None;
             value.prepared_submission = Some(PreparedSubmission {
-                identity: identity.clone(),
-                version: *version,
+                identity,
+                version,
                 draw_count,
                 plan: plan.clone(),
             });
@@ -3949,8 +3974,8 @@ fn finish_prepared_frame(
             value.previous_uniforms = uniform_slices;
             if let Some((identity, version)) = prepared_key {
                 value.prepared_submission = Some(PreparedSubmission {
-                    identity: identity.clone(),
-                    version: *version,
+                    identity,
+                    version,
                     draw_count,
                     plan: plan_rc,
                 });
@@ -3998,8 +4023,8 @@ fn finish_prepared_frame(
     }
     if let Some((identity, version)) = prepared_key {
         value.prepared_submission = Some(PreparedSubmission {
-            identity: identity.clone(),
-            version: *version,
+            identity,
+            version,
             draw_count,
             plan: plan.clone().expect("a prepared key retains its plan"),
         });
@@ -4053,6 +4078,16 @@ pub fn submit(
     value: &mut SceneExecution,
     draws: &[Draw],
 ) -> Result<bool, Error> {
+    submit_named(prepared.as_ref().map(|(name, version)| (name.as_str(), *version)), after_prepare, clear, value, draws)
+}
+
+pub(crate) fn submit_named(
+    prepared: Option<(&str, i64)>,
+    after_prepare: &mut dyn FnMut(),
+    clear: Option<(f64, f64, f64, f64)>,
+    value: &mut SceneExecution,
+    draws: &[Draw],
+) -> Result<bool, Error> {
     let clear = clear.unwrap_or((0.0, 0.0, 0.0, 0.0));
     if value.dead {
         after_prepare();
@@ -4062,8 +4097,8 @@ pub fn submit(
         after_prepare();
         return Err(failure_error("Renderer.submit", ErrorKind::Capacity, "one submission exceeds the bounded prepared-draw capacity"));
     }
-    if let (Some((identity, version)), Some(cached)) = (&prepared, &value.prepared_submission)
-        && cached.identity == *identity && cached.version == *version && cached.plan.clear == clear {
+    if let (Some((identity, version)), Some(cached)) = (prepared, &value.prepared_submission)
+        && cached.identity == identity && cached.version == version && cached.plan.clear == clear {
             let plan = cached.plan.clone();
             after_prepare();
             return replay_plan(value, &plan);
@@ -4071,8 +4106,10 @@ pub fn submit(
     // Same prepared identity with a new version: keep the prior plan for same-shape patching
     // instead of destroying its ICBs before finish_prepared_frame can reuse them.
     let old = value.prepared_submission.take();
-    match (old, &prepared) {
-        (Some(cached), Some((identity, _))) if cached.identity == *identity => {
+    let mut name = None;
+    match (old, prepared) {
+        (Some(cached), Some((identity, _))) if cached.identity == identity => {
+            name = Some(cached.identity);
             let prior_auto = value.automatic_submission.take();
             drop_plan(value, prior_auto);
             value.automatic_submission = Some(cached.plan);
@@ -4080,17 +4117,29 @@ pub fn submit(
         (Some(cached), _) => drop_plan(value, Some(cached.plan)),
         (None, _) => {}
     }
-    let prepared_key = prepared.clone();
-    let draws = match resolve_prepared(value, &prepared, draws) {
-        Ok(draws) => draws,
+    let prepared_key = prepared.map(|(identity, version)| (name.unwrap_or_else(|| identity.to_owned()), version));
+    let mut resolved = std::mem::take(&mut value.submit_draws);
+    let result = match resolve_prepared(value, &prepared_key, draws, &mut resolved) {
+        Ok(()) => submit_draws(value, prepared_key, after_prepare, clear, &mut resolved),
         Err(e) => {
             after_prepare();
-            return Err(e);
+            Err(e)
         }
     };
-    // An empty mesh (a zero-length line, a zero-radius circle) draws nothing: skip it instead of
-    // failing the whole frame.
-    let draws: Vec<Draw> = draws.into_iter().filter(|entry| entry.ui.is_some() || (entry.draw.mesh.vertex_count > 0 && entry.draw.mesh.index_count > 0)).collect();
+    resolved.clear();
+    value.submit_draws = resolved;
+    result
+}
+
+fn submit_draws(
+    value: &mut SceneExecution,
+    prepared_key: Option<(String, i64)>,
+    after_prepare: &mut dyn FnMut(),
+    clear: (f64, f64, f64, f64),
+    draws: &mut Vec<Draw>,
+) -> Result<bool, Error> {
+    // A zero-length line or zero-radius circle contributes no visible draw.
+    draws.retain(|entry| entry.ui.is_some() || (entry.draw.mesh.vertex_count > 0 && entry.draw.mesh.index_count > 0));
     let valid_mesh = |mesh: &Mesh| {
         !mesh.key.is_empty()
             && mesh.vertex_count > 0
@@ -4131,7 +4180,7 @@ pub fn submit(
         after_prepare();
         return finish_submit(value, deferred_items, Err(e));
     }
-    let result = submit_prepared(value, &mut deferred_items, &prepared_key, clear, &draws, after_prepare);
+    let result = submit_prepared(value, &mut deferred_items, prepared_key, clear, draws, after_prepare);
     clear_prepared_scratch(&mut value.prepared_scratch);
     finish_submit(value, deferred_items, result)
 }
@@ -4146,35 +4195,47 @@ struct DrawMode {
 fn submit_prepared(
     value: &mut SceneExecution,
     defer: &mut Vec<Deferred>,
-    prepared_key: &Option<(String, i64)>,
+    prepared_key: Option<(String, i64)>,
     clear: (f64, f64, f64, f64),
     draws: &[Draw],
     after_prepare: &mut dyn FnMut(),
 ) -> Result<bool, Error> {
-    let modes: Vec<DrawMode> = draws
-        .iter()
-        .map(|entry| {
-            let family = entry.family;
-            let draw = &entry.draw;
-            let scene2 = family == Scene2 || family == Scene2Textured;
-            let affine = (family == Ui || family == Marks || family == MarksFill)
-                && draw.state.transform_uniforms.as_ref().is_some_and(|b| blen(b) == 24 || blen(b) == 48);
-            let scene3_transform = !scene2
-                && draw.state.transform_uniforms.as_ref().is_some_and(|b| blen(b) >= 5456 && (blen(b) - 5456).is_multiple_of(192));
-            // a Scene2 mesh binds constants; a quad's are its vertices
-            let source = if family == Scene2 {
-                Some(geometry_constants(draw.state.transform_uniforms.as_ref()))
-            } else if scene2 {
-                None
-            } else if affine || scene3_transform {
-                draw.state.transform_uniforms.clone()
-            } else {
-                None
-            };
-            DrawMode { scene2, affine, scene3_transform, source }
-        })
-        .collect();
-    let sources: Vec<Option<Bytes>> = modes.iter().map(|m| m.source.clone()).collect();
+    let mut modes = std::mem::take(&mut value.submit_modes);
+    modes.extend(draws.iter().map(|entry| {
+        let family = entry.family;
+        let draw = &entry.draw;
+        let scene2 = family == Scene2 || family == Scene2Textured;
+        let affine = (family == Ui || family == Marks || family == MarksFill)
+            && draw.state.transform_uniforms.as_ref().is_some_and(|b| blen(b) == 24 || blen(b) == 48);
+        let scene3_transform = !scene2
+            && draw.state.transform_uniforms.as_ref().is_some_and(|b| blen(b) >= 5456 && (blen(b) - 5456).is_multiple_of(192));
+        // a Scene2 mesh binds constants; a quad's are its vertices
+        let source = if family == Scene2 {
+            Some(geometry_constants(&mut value.geometry_constants, draw.state.transform_uniforms.as_ref()))
+        } else if scene2 {
+            None
+        } else if affine || scene3_transform {
+            draw.state.transform_uniforms.clone()
+        } else {
+            None
+        };
+        DrawMode { scene2, affine, scene3_transform, source }
+    }));
+    let result = prepare_frame(value, defer, prepared_key, clear, draws, &modes, after_prepare);
+    modes.clear();
+    value.submit_modes = modes;
+    result
+}
+
+fn prepare_frame(
+    value: &mut SceneExecution,
+    defer: &mut Vec<Deferred>,
+    prepared_key: Option<(String, i64)>,
+    clear: (f64, f64, f64, f64),
+    draws: &[Draw],
+    modes: &[DrawMode],
+    after_prepare: &mut dyn FnMut(),
+) -> Result<bool, Error> {
     let frame = match acquire(value) {
         Err(e) => {
             after_prepare();
@@ -4186,7 +4247,7 @@ fn submit_prepared(
         }
         Ok(Acquisition::Acquired(frame)) => frame,
     };
-    let uniform_slices = match prepare_uniforms(value, defer, &sources) {
+    let uniform_slices = match prepare_uniforms(value, defer, modes) {
         Ok(uniforms) => uniforms,
         Err(e) => {
             after_prepare();
@@ -4194,7 +4255,7 @@ fn submit_prepared(
             return Err(e);
         }
     };
-    if let Err(e) = prepare_all(value, defer, draws, &modes, &uniform_slices) {
+    if let Err(e) = prepare_all(value, defer, draws, modes, &uniform_slices) {
         after_prepare();
         discard(&frame);
         return Err(e);
@@ -4426,7 +4487,8 @@ pub mod private {
 
     /// The number of draws the renderer encodes for these, after merging neighbours; -1 on error.
     pub fn coalesced_draws_for_test(draws: &[Draw]) -> i64 {
-        coalesce_draws(draws).map_or(-1, |draws| draws.len() as i64)
+        let mut merged = Vec::new();
+        coalesce_draws_into(draws, &mut merged).map_or(-1, |()| merged.len() as i64)
     }
 }
 
@@ -4490,7 +4552,7 @@ pub fn destroy(value: &mut SceneExecution) -> Result<(), Error> {
         }
     }
     side_lru::clear(&mut value.cache);
-    value.previous_uniforms = Vec::new();
+    Rc::make_mut(&mut value.previous_uniforms).clear();
     value.uniform_staging.clear();
     if let Some((staging, _)) = value.buffer_staging.take() {
         named("buffer staging", backend::destroy_buffer(&staging), &mut first);

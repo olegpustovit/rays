@@ -637,14 +637,24 @@ fn close_submission(submission_: &Submission) {
 }
 
 pub fn begin_submission(value: &Renderer) -> Result<Submission, Error> {
+    begin_submission_reusing(value, &mut None)
+}
+
+/// Reopen a closed submission only when its previous caller and batches have all released it.
+pub fn begin_submission_reusing(value: &Renderer, spare: &mut Option<Submission>) -> Result<Submission, Error> {
     ensure("Renderer.Native.begin_submission", value)?;
-    let submission_ = Submission(Rc::new(SubmissionData {
+    let old = spare.take().filter(|old| {
+        Rc::ptr_eq(&old.0.owner.0, &value.0) && old.0.submission_state.get() == SubmissionState::Closed
+            && Rc::strong_count(&old.0) == 1 && Rc::weak_count(&old.0) == 0
+    });
+    let submission = old.unwrap_or_else(|| Submission(Rc::new(SubmissionData {
         owner: value.clone(),
-        submission_state: Cell::new(SubmissionState::Open),
+        submission_state: Cell::new(SubmissionState::Closed),
         image_leases: renderer_leases::create(),
-    }));
-    value.0.submissions.borrow_mut().insert(0, submission_.clone());
-    Ok(submission_)
+    })));
+    submission.0.submission_state.set(SubmissionState::Open);
+    value.0.submissions.borrow_mut().insert(0, submission.clone());
+    Ok(submission)
 }
 
 fn ensure_submission(operation: &str, submission_: &Submission) -> Result<(), Error> {
@@ -1176,9 +1186,9 @@ fn step_inner(
             let mut scaled_cache = value.0.scaled.borrow_mut();
             let scaled = scale_sampled_ref(&mut scaled_cache, &value.0.renderer_facts.get(), &draws);
             let result = match (identity, version) {
-                (None, None) => scene_execution::submit(None, after_prepare, clear, &mut value.0.renderer.borrow_mut(), &scaled),
+                (None, None) => scene_execution::submit_named(None, after_prepare, clear, &mut value.0.renderer.borrow_mut(), &scaled),
                 (Some(identity), Some(version)) => {
-                    scene_execution::submit(Some((identity.to_owned(), version)), after_prepare, clear, &mut value.0.renderer.borrow_mut(), &scaled)
+                    scene_execution::submit_named(Some((identity, version)), after_prepare, clear, &mut value.0.renderer.borrow_mut(), &scaled)
                 }
                 _ => {
                     after_prepare();
